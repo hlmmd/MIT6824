@@ -1,5 +1,11 @@
 # MIT6824
 
+6.824 source code
+
+```bash
+git clone git://g.csail.mit.edu/6.824-golabs-2021 6.824
+```
+
 ## vscode go 环境配置
 
 [https://cloud.tencent.com/developer/article/1590274](https://cloud.tencent.com/developer/article/1590274)
