@@ -5,11 +5,11 @@ import "net"
 import "os"
 import "net/rpc"
 import "net/http"
-
+import "fmt"
 
 type Coordinator struct {
 	// Your definitions here.
-
+	FileMap map[string]bool
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -19,11 +19,18 @@ type Coordinator struct {
 //
 // the RPC argument and reply types are defined in rpc.go.
 //
-func (c *Coordinator) Example(args *ExampleArgs, reply *ExampleReply) error {
-	reply.Y = args.X + 1
+
+func (c *Coordinator) OnMapRequest(req *MapRequest, res *MapRespnse) error {
+	for key, v := range c.FileMap {
+		if !v {
+			res.Filename = key
+			res.WorkType = "MAP"
+			c.FileMap[key] = true
+			break
+		}
+	}
 	return nil
 }
-
 
 //
 // start a thread that listens for RPCs from worker.go
@@ -50,7 +57,6 @@ func (c *Coordinator) Done() bool {
 
 	// Your code here.
 
-
 	return ret
 }
 
@@ -61,9 +67,13 @@ func (c *Coordinator) Done() bool {
 //
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
+	c.FileMap = make(map[string]bool)
+	for _, filename := range files {
+		fmt.Printf("%v ", filename)
+		c.FileMap[filename] = false
+	}
 
 	// Your code here.
-
 
 	c.server()
 	return &c
