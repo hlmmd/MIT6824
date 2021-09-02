@@ -6,15 +6,28 @@ package mr
 // remember to capitalize all names.
 //
 
-import "os"
-import "strconv"
+import (
+	"os"
+	"strconv"
+)
 
-type MapRequest struct {
+
+type RegisterRequest struct {
+	WokerId int
 }
 
-type MapRespnse struct {
+type RegisterRespnse struct {
+}
+
+type MapReduceRequest struct {
+}
+
+type MapReduceRespnse struct {
+	Done bool
+	Type string
 	Filename string
-	WorkType string
+	MapId int
+	ReduceId int
 }
 
 // Cook up a unique-ish UNIX-domain socket name
@@ -26,3 +39,4 @@ func coordinatorSock() string {
 	s += strconv.Itoa(os.Getuid())
 	return s
 }
+

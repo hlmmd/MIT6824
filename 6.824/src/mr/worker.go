@@ -1,11 +1,16 @@
 package mr
 
-import "fmt"
-import "log"
-import "net/rpc"
-import "hash/fnv"
-import "os"
-import "io/ioutil"
+import (
+	"fmt"
+	"hash/fnv"
+	"log"
+	"net/rpc"
+	"os"
+)
+
+// import "os"
+// import "io/ioutil"
+// import "sort"
 
 //
 // Map functions return a slice of KeyValue.
@@ -14,6 +19,16 @@ type KeyValue struct {
 	Key   string
 	Value string
 }
+
+var WorkerId int
+
+// for sorting by key.
+type ByKey []KeyValue
+
+// for sorting by key.
+func (a ByKey) Len() int           { return len(a) }
+func (a ByKey) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a ByKey) Less(i, j int) bool { return a[i].Key < a[j].Key }
 
 //
 // use ihash(key) % NReduce to choose the reduce
@@ -32,52 +47,31 @@ func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
 	// Your worker implementation here.
+	id := Register()
+	log.Printf("id:%v", id)
 
-	res := SendMapRequest()
-	if res.WorkType == "MAP" {
-		fmt.Printf("filename %v\n", res.Filename)
+	for {
 
-		filename := res.Filename
-
-		file, err := os.Open(filename)
-		if err != nil {
-			log.Fatalf("cannot open %v", filename)
+		req := MapReduceRequest{}
+		res := MapReduceRespnse{}
+		call("Coordinator.OnMapReduceRequest", &req, &res)
+		if res.Done {
+			break
 		}
-		content, err := ioutil.ReadAll(file)
-		if err != nil {
-			log.Fatalf("cannot read %v", filename)
+		if res.Type == "MAP" {
+			log.Printf("receive filename :%v\n", res.Filename)
+		}else if res.Type == "REDUCE"{
+			log.Println("reduce")
 		}
-		file.Close()
-		kva := mapf(filename, string(content))
-		log.Printf("%v\n", len(kva))
-		// for k, v := range kva {
-		// 	fmt.Printf("%v %v", k, v)
-		// }
-		//intermediate = append(intermediate, kva...)
-
-	} else if res.WorkType == "REDUCE" {
-		fmt.Print("empty")
-	} else {
-		fmt.Print("unknown work type")
 	}
 
 }
 
-// example function to show how to make an RPC call to the coordinator.
-//
-// the RPC argument and reply types are defined in rpc.go.
-//
-func SendMapRequest() MapRespnse {
+func Register() int {
 
-	// declare an argument structure.
-	req := MapRequest{}
-
-	// declare a reply structure.
-	res := MapRespnse{}
-
-	// send the RPC request, wait for the reply.
-	call("Coordinator.OnMapRequest", &req, &res)
-	return res
+	WorkerId = os.Getpid()
+	call("Coordinator.OnRegister", RegisterRequest{WorkerId}, RegisterRespnse{})
+	return WorkerId
 }
 
 //
