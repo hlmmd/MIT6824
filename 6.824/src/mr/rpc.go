@@ -14,9 +14,9 @@ import (
 type TaskType int
 
 const (
-	MAP_TASK    TaskType = 0
-	REDUCE_TASK TaskType = 1
-	END_TASK    TaskType = 2
+	END_TASK    TaskType = 0
+	MAP_TASK    TaskType = 1
+	REDUCE_TASK TaskType = 2
 	WAIT_TASK   TaskType = 3
 )
 
@@ -48,7 +48,9 @@ type TaskResponse struct {
 	MapId    int
 
 	// for reduce tasks
-	ReduceId int
+	ReduceId   int
+	MapIdStart int
+	MapIdEnd   int
 }
 
 type StatusRequest struct {

@@ -81,6 +81,10 @@ func doMap(res TaskResponse, mapf func(string, string) []KeyValue) {
 
 }
 
+func doRecude(res TaskResponse, reducef func(string, []string) string) {
+	log.Printf("doing reduce :%v", res.ReduceId)
+}
+
 // 完成task后，通知coordinator
 
 func completeTask(res TaskResponse) {
@@ -111,8 +115,10 @@ func Worker(mapf func(string, string) []KeyValue,
 		call("Coordinator.OnTaskRequest", &req, &res)
 		if res.Type == MAP_TASK {
 			doMap(res, mapf)
+			completeTask(res)
 		} else if res.Type == REDUCE_TASK {
-			log.Println("reduce")
+			doRecude(res, reducef)
+			completeTask(res)
 		} else if res.Type == END_TASK {
 			break
 		} else if res.Type == WAIT_TASK {
@@ -122,7 +128,6 @@ func Worker(mapf func(string, string) []KeyValue,
 			break
 		}
 
-		completeTask(res)
 	}
 
 }
