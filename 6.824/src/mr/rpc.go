@@ -11,23 +11,54 @@ import (
 	"strconv"
 )
 
+type TaskType int
+
+const (
+	MAP_TASK    TaskType = 0
+	REDUCE_TASK TaskType = 1
+	END_TASK    TaskType = 2
+	WAIT_TASK   TaskType = 3
+)
+
+type TaskStatus int
+
+const (
+	TODO  TaskStatus = 0
+	DOING TaskStatus = 1
+	DONE  TaskStatus = 2
+)
 
 type RegisterRequest struct {
-	WokerId int
 }
 
 type RegisterRespnse struct {
+	WorkerId int
+	NReduce  int
 }
 
-type MapReduceRequest struct {
+type TaskRequest struct {
+	WorkerId int
 }
 
-type MapReduceRespnse struct {
-	Done bool
-	Type string
+type TaskResponse struct {
+	Type TaskType
+
+	// for map tasks
 	Filename string
-	MapId int
+	MapId    int
+
+	// for reduce tasks
 	ReduceId int
+}
+
+type StatusRequest struct {
+	Type     TaskType
+	MapId    int
+	ReduceId int
+	Status   TaskStatus
+}
+
+type StatusReSponse struct {
 }
 
 // Cook up a unique-ish UNIX-domain socket name
@@ -39,4 +70,3 @@ func coordinatorSock() string {
 	s += strconv.Itoa(os.Getuid())
 	return s
 }
-

@@ -1,16 +1,16 @@
 package mr
 
 import (
+	"encoding/json"
 	"fmt"
 	"hash/fnv"
+	"io/ioutil"
 	"log"
 	"net/rpc"
 	"os"
+	"sort"
+	"time"
 )
-
-// import "os"
-// import "io/ioutil"
-// import "sort"
 
 //
 // Map functions return a slice of KeyValue.
@@ -21,6 +21,7 @@ type KeyValue struct {
 }
 
 var WorkerId int
+var NReduce int
 
 // for sorting by key.
 type ByKey []KeyValue
@@ -40,6 +41,60 @@ func ihash(key string) int {
 	return int(h.Sum32() & 0x7fffffff)
 }
 
+func doMap(res TaskResponse, mapf func(string, string) []KeyValue) {
+	intermediate := make([][]KeyValue, NReduce)
+	for i := 0; i < NReduce; i++ {
+		intermediate[i] = make([]KeyValue, 0)
+	}
+	filename := res.Filename
+	file, err := os.Open(filename)
+	if err != nil {
+		log.Fatalf("cannot open %v", filename)
+	}
+	content, err := ioutil.ReadAll(file)
+	if err != nil {
+		log.Fatalf("cannot read %v", filename)
+	}
+	file.Close()
+	kva := mapf(filename, string(content))
+	for _, key := range kva {
+		idx := ihash(key.Key) % NReduce
+		intermediate[idx] = append(intermediate[idx], key)
+	}
+	for i := 0; i < len(intermediate); i++ {
+		sort.Sort(ByKey(intermediate[i]))
+		oname := fmt.Sprintf("mr-%v-%v", res.MapId, i)
+		ofile, _ := os.Create(oname)
+
+		enc := json.NewEncoder(ofile)
+		for _, kv := range intermediate[i] {
+			err := enc.Encode(&kv)
+			if err != nil {
+				break
+			}
+		}
+
+		ofile.Close()
+
+		log.Printf("file: %v, map:%v reduce: %v count: %v", filename, res.MapId, i, len(intermediate[i]))
+	}
+
+}
+
+// 完成task后，通知coordinator
+
+func completeTask(res TaskResponse) {
+	req := StatusRequest{}
+	req.Type = res.Type
+	req.Status = DONE
+	if res.Type == MAP_TASK {
+		req.MapId = res.MapId
+	} else if res.Type == REDUCE_TASK {
+		req.ReduceId = res.ReduceId
+	}
+	call("Coordinator.OnCompleteTask", &req, &StatusReSponse{})
+}
+
 //
 // main/mrworker.go calls this function.
 //
@@ -47,31 +102,36 @@ func Worker(mapf func(string, string) []KeyValue,
 	reducef func(string, []string) string) {
 
 	// Your worker implementation here.
-	id := Register()
-	log.Printf("id:%v", id)
+	WorkerId, NReduce = Register()
+	log.Printf("id:%v nreduce:%v", WorkerId, NReduce)
 
 	for {
-
-		req := MapReduceRequest{}
-		res := MapReduceRespnse{}
-		call("Coordinator.OnMapReduceRequest", &req, &res)
-		if res.Done {
+		req := TaskRequest{}
+		res := TaskResponse{}
+		call("Coordinator.OnTaskRequest", &req, &res)
+		if res.Type == MAP_TASK {
+			doMap(res, mapf)
+		} else if res.Type == REDUCE_TASK {
+			log.Println("reduce")
+		} else if res.Type == END_TASK {
+			break
+		} else if res.Type == WAIT_TASK {
+			time.Sleep(time.Second)
+		} else {
+			log.Fatalf("unknown task type")
 			break
 		}
-		if res.Type == "MAP" {
-			log.Printf("receive filename :%v\n", res.Filename)
-		}else if res.Type == "REDUCE"{
-			log.Println("reduce")
-		}
+
+		completeTask(res)
 	}
 
 }
 
-func Register() int {
+func Register() (int, int) {
 
-	WorkerId = os.Getpid()
-	call("Coordinator.OnRegister", RegisterRequest{WorkerId}, RegisterRespnse{})
-	return WorkerId
+	res := RegisterRespnse{}
+	call("Coordinator.OnRegister", RegisterRequest{}, &res)
+	return res.WorkerId, res.NReduce
 }
 
 //

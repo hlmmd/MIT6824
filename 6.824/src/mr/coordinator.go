@@ -9,15 +9,25 @@ import (
 	"sync"
 )
 
+type TaskInfo struct {
+	status   TaskStatus
+	workerId int
+}
+
 type Coordinator struct {
 	// Your definitions here.
-	mu            sync.Mutex
+	mu sync.Mutex
+
+	mapTaskStatus    []TaskInfo
+	reduceTaskStatus []TaskInfo
+
 	filenameArray []string
-	finished      map[string]bool
-	workers       []int
+	onlineWorkers []int
+	workerId      int
 	nReduce       int
-	mapId         int
-	done          bool
+
+	doneMap bool
+	done    bool
 }
 
 // Your code here -- RPC handlers for the worker to call.
@@ -29,45 +39,80 @@ type Coordinator struct {
 //
 
 func (c *Coordinator) OnRegister(req *RegisterRequest, res *RegisterRespnse) error {
-	c.workers = append(c.workers, req.WokerId)
-	return nil
-}
-func (c *Coordinator) OnMapReduceRequest(req *MapReduceRequest, res *MapReduceRespnse) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	hasUnFinished := false
-	for _, filename := range c.filenameArray {
-		if !c.finished[filename] {
-			res.Type = "MAP"
-			res.Filename = filename
-			res.MapId = c.mapId
-			c.mapId++
-			c.finished[filename] = true
-			hasUnFinished = true
-			break
-		}
-	}
-	if !hasUnFinished {
-		res.Done = true
-		c.done = true
-	}
+	c.workerId++
+	res.NReduce = c.nReduce
+	res.WorkerId = c.workerId
+	c.onlineWorkers = append(c.onlineWorkers, c.workerId)
 	return nil
 }
 
-// func (c *Coordinator) OnMapRequest(req *MapRequest, res *MapRespnse) error {
-// 	c.mu.Lock()
-// 	defer c.mu.Unlock()
-// 	for _, filename := range c.filenameArray {
-// 		if !c.finished[filename] {
-// 			res.Filename = filename
-// 			res.MapId = c.mapId
-// 			c.mapId++
-// 			c.finished[filename] = true
-// 			break
-// 		}
-// 	}
-// 	return nil
-// }
+func (c *Coordinator) finishAllMapTasks() bool {
+	if c.doneMap {
+		return true
+	}
+	for _, info := range c.mapTaskStatus {
+		if info.status != DONE {
+			return false
+		}
+	}
+	return true
+}
+
+func (c *Coordinator) getUnStartedMapTask() int {
+	for mapId, info := range c.mapTaskStatus {
+		if info.status == TODO {
+			return mapId
+		}
+	}
+	return -1
+}
+
+func (c *Coordinator) sendMapTask(mapId int, req *TaskRequest, res *TaskResponse) error {
+
+	if c.mapTaskStatus[mapId].status != TODO {
+		// TODO 如何定义error?
+		return nil
+	}
+	c.mapTaskStatus[mapId].status = DOING
+	c.mapTaskStatus[mapId].workerId = req.WorkerId
+
+	res.Type = MAP_TASK
+	res.Filename = c.filenameArray[mapId]
+	res.MapId = mapId
+	return nil
+}
+
+func (c *Coordinator) OnCompleteTask(req *StatusRequest, res *StatusReSponse) error {
+	if req.Type == MAP_TASK {
+		c.mapTaskStatus[req.MapId].status = DONE
+	} else if req.Type == REDUCE_TASK {
+		c.reduceTaskStatus[req.ReduceId].status = DONE
+	}
+
+	return nil
+}
+
+func (c *Coordinator) OnTaskRequest(req *TaskRequest, res *TaskResponse) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if c.finishAllMapTasks() {
+		res.Type = END_TASK
+		c.done = true
+	} else {
+		mapId := c.getUnStartedMapTask()
+		if mapId == -1 {
+			res.Type = WAIT_TASK
+			log.Printf("Wait for doing Mapping")
+		} else {
+			c.sendMapTask(mapId, req, res)
+		}
+	}
+
+	return nil
+}
 
 //
 // start a thread that listens for RPCs from worker.go
@@ -105,12 +150,9 @@ func (c *Coordinator) Done() bool {
 func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c := Coordinator{}
 	c.nReduce = nReduce
-	c.finished = make(map[string]bool)
-	for _, filename := range files {
-		log.Printf("%v ", filename)
-		c.filenameArray = append(c.filenameArray, filename)
-		c.finished[filename] = false
-	}
+	c.filenameArray = files
+	c.mapTaskStatus = make([]TaskInfo, len(files))
+	c.reduceTaskStatus = make([]TaskInfo, nReduce)
 
 	// Your code here.
 
