@@ -122,6 +122,8 @@ func (c *Coordinator) sendReduceTask(reduceId int, req *TaskRequest, res *TaskRe
 }
 
 func (c *Coordinator) OnCompleteTask(req *StatusRequest, res *StatusReSponse) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if req.Type == MAP_TASK {
 		c.mapTaskStatus[req.MapId].status = DONE
 	} else if req.Type == REDUCE_TASK {
@@ -183,9 +185,8 @@ func (c *Coordinator) server() {
 //
 func (c *Coordinator) Done() bool {
 	c.mu.Lock()
-	done := c.done
-	c.mu.Unlock()
-	return done
+	defer c.mu.Unlock()
+	return c.done
 }
 
 //
@@ -205,3 +206,4 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c.server()
 	return &c
 }
+

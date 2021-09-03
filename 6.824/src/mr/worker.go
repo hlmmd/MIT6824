@@ -50,10 +50,12 @@ func doMap(res TaskResponse, mapf func(string, string) []KeyValue) {
 	file, err := os.Open(filename)
 	if err != nil {
 		log.Fatalf("cannot open %v", filename)
+		return
 	}
 	content, err := ioutil.ReadAll(file)
 	if err != nil {
 		log.Fatalf("cannot read %v", filename)
+		return
 	}
 	file.Close()
 	kva := mapf(filename, string(content))
@@ -75,14 +77,59 @@ func doMap(res TaskResponse, mapf func(string, string) []KeyValue) {
 		}
 
 		ofile.Close()
-
-		log.Printf("file: %v, map:%v reduce: %v count: %v", filename, res.MapId, i, len(intermediate[i]))
 	}
 
 }
 
 func doRecude(res TaskResponse, reducef func(string, []string) string) {
-	log.Printf("doing reduce :%v", res.ReduceId)
+	reduceId := res.ReduceId
+	intermediate := []KeyValue{}
+	for mapId := res.MapIdStart; mapId < res.MapIdEnd; mapId++ {
+		tmpFileName := fmt.Sprintf("mr-%v-%v", mapId, reduceId)
+		file, err := os.Open(tmpFileName)
+		if err != nil {
+			log.Fatalf("cannot open %v", tmpFileName)
+			break
+		}
+
+		dec := json.NewDecoder(file)
+		for {
+			var kv KeyValue
+			if err := dec.Decode(&kv); err != nil {
+				break
+			}
+			intermediate = append(intermediate, kv)
+		}
+		file.Close()
+	}
+	sort.Sort(ByKey(intermediate))
+
+	oname := fmt.Sprintf("mr-out-%v", reduceId)
+	ofile, _ := os.Create(oname)
+
+	//
+	// call Reduce on each distinct key in intermediate[],
+	// and print the result to mr-out-0.
+	//
+	i := 0
+	for i < len(intermediate) {
+		j := i + 1
+		for j < len(intermediate) && intermediate[j].Key == intermediate[i].Key {
+			j++
+		}
+		values := []string{}
+		for k := i; k < j; k++ {
+			values = append(values, intermediate[k].Value)
+		}
+		output := reducef(intermediate[i].Key, values)
+
+		// this is the correct format for each line of Reduce output.
+		fmt.Fprintf(ofile, "%v %v\n", intermediate[i].Key, output)
+
+		i = j
+	}
+
+	ofile.Close()
 }
 
 // 完成task后，通知coordinator
@@ -107,7 +154,6 @@ func Worker(mapf func(string, string) []KeyValue,
 
 	// Your worker implementation here.
 	WorkerId, NReduce = Register()
-	log.Printf("id:%v nreduce:%v", WorkerId, NReduce)
 
 	for {
 		req := TaskRequest{}
@@ -161,3 +207,4 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	fmt.Println(err)
 	return false
 }
+
