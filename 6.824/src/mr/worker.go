@@ -104,8 +104,10 @@ func doRecude(res TaskResponse, reducef func(string, []string) string) {
 	}
 	sort.Sort(ByKey(intermediate))
 
+	// 在文件写完之后，再rename成目标文件，以防有人读到不完整的文件
 	oname := fmt.Sprintf("mr-out-%v", reduceId)
-	ofile, _ := os.Create(oname)
+	ofile, _ := ioutil.TempFile(os.TempDir(), "mr-temp")
+	// ofile, _ := os.Create(oname)
 
 	//
 	// call Reduce on each distinct key in intermediate[],
@@ -128,8 +130,9 @@ func doRecude(res TaskResponse, reducef func(string, []string) string) {
 
 		i = j
 	}
-
+	tmpFilename := ofile.Name()
 	ofile.Close()
+	os.Rename(tmpFilename, oname)
 }
 
 // 完成task后，通知coordinator
@@ -155,9 +158,19 @@ func Worker(mapf func(string, string) []KeyValue,
 	// Your worker implementation here.
 	WorkerId, NReduce = Register()
 
+	go func() {
+		for {
+			time.Sleep(time.Second * HEART_BEAT_INTERVAL)
+			req := HeartBeatRequest{}
+			req.WorkerId = WorkerId
+			call("Coordinator.OnHeartBeat", &req, &HeartBeatResponse{})
+		}
+	}()
+
 	for {
 		req := TaskRequest{}
 		res := TaskResponse{}
+		req.WorkerId = WorkerId
 		call("Coordinator.OnTaskRequest", &req, &res)
 		if res.Type == MAP_TASK {
 			doMap(res, mapf)
@@ -207,4 +220,3 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	fmt.Println(err)
 	return false
 }
-

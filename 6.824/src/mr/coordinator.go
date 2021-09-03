@@ -7,6 +7,7 @@ import (
 	"net/rpc"
 	"os"
 	"sync"
+	"time"
 )
 
 type TaskInfo struct {
@@ -20,9 +21,9 @@ type Coordinator struct {
 
 	mapTaskStatus    []TaskInfo
 	reduceTaskStatus []TaskInfo
+	workerAliveStamp map[int]int64
 
 	filenameArray []string
-	onlineWorkers []int
 	workerId      int
 	nReduce       int
 
@@ -38,13 +39,31 @@ type Coordinator struct {
 // the RPC argument and reply types are defined in rpc.go.
 //
 
+const (
+	HEART_BEAT_INTERVAL = 10
+	TIMEOUT             = 15
+)
+
+func (c *Coordinator) OnHeartBeat(req *HeartBeatRequest, res *HeartBeatResponse) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	_, ok := c.workerAliveStamp[req.WorkerId]
+	if !ok {
+		return nil
+	}
+	// 更新timestamp
+	c.workerAliveStamp[req.WorkerId] = time.Now().Unix()
+
+	return nil
+}
+
 func (c *Coordinator) OnRegister(req *RegisterRequest, res *RegisterRespnse) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.workerId++
 	res.NReduce = c.nReduce
 	res.WorkerId = c.workerId
-	c.onlineWorkers = append(c.onlineWorkers, c.workerId)
+	c.workerAliveStamp[res.WorkerId] = time.Now().Unix()
 	return nil
 }
 
@@ -136,7 +155,11 @@ func (c *Coordinator) OnCompleteTask(req *StatusRequest, res *StatusReSponse) er
 func (c *Coordinator) OnTaskRequest(req *TaskRequest, res *TaskResponse) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
+	// worker 超时后，coordinator断开了连接，之后再收到该worker的消息便忽略
+	_, ok := c.workerAliveStamp[req.WorkerId]
+	if !ok {
+		return nil
+	}
 	if c.finishAllMapTasks() {
 		if c.finishAllReduceTasks() {
 			res.Type = END_TASK
@@ -145,7 +168,7 @@ func (c *Coordinator) OnTaskRequest(req *TaskRequest, res *TaskResponse) error {
 			reduceId := c.getUnStartedReduceTask()
 			if reduceId == -1 {
 				res.Type = WAIT_TASK
-				log.Printf("Wait for doing Reduce")
+				//	log.Printf("Wait for doing Reduce")
 			} else {
 				c.sendReduceTask(reduceId, req, res)
 			}
@@ -154,7 +177,7 @@ func (c *Coordinator) OnTaskRequest(req *TaskRequest, res *TaskResponse) error {
 		mapId := c.getUnStartedMapTask()
 		if mapId == -1 {
 			res.Type = WAIT_TASK
-			log.Printf("Wait for doing Map")
+			//	log.Printf("Wait for doing Map")
 		} else {
 			c.sendMapTask(mapId, req, res)
 		}
@@ -200,10 +223,39 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c.filenameArray = files
 	c.mapTaskStatus = make([]TaskInfo, len(files))
 	c.reduceTaskStatus = make([]TaskInfo, nReduce)
+	c.workerAliveStamp = make(map[int]int64)
 
 	// Your code here.
+
+	go func() {
+		for {
+			nowTimestamp := time.Now().Unix()
+			c.mu.Lock()
+			for workerId, ts := range c.workerAliveStamp {
+				timeDiff := nowTimestamp - ts
+				// 当一个worker fail的时候，重置其所有已经完成的map task
+				// reduce task不需要重置，因为其结果存放在gfs上，可以访问到
+				if timeDiff >= TIMEOUT {
+					delete(c.workerAliveStamp, workerId)
+
+					for i := 0; i < len(c.mapTaskStatus); i++ {
+						if c.mapTaskStatus[i].workerId == workerId {
+							c.mapTaskStatus[i].status = TODO
+						}
+					}
+
+					for i := 0; i < len(c.reduceTaskStatus); i++ {
+						if c.reduceTaskStatus[i].workerId == workerId && c.reduceTaskStatus[i].status == DOING {
+							c.reduceTaskStatus[i].status = TODO
+						}
+					}
+				}
+			}
+			c.mu.Unlock()
+			time.Sleep(time.Second * HEART_BEAT_INTERVAL)
+		}
+	}()
 
 	c.server()
 	return &c
 }
-
