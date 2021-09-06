@@ -105,8 +105,12 @@ func doRecude(res TaskResponse, reducef func(string, []string) string) {
 	sort.Sort(ByKey(intermediate))
 
 	// 在文件写完之后，再rename成目标文件，以防有人读到不完整的文件
-	oname := fmt.Sprintf("mr-out-%v", reduceId)
-	ofile, _ := ioutil.TempFile(os.TempDir(), "mr-temp")
+	oname := fmt.Sprintf("./mr-out-%v", reduceId)
+	// ofile, _ := ioutil.TempFile(os.TempDir(), "mr-temp")
+	ofile, ok := ioutil.TempFile("./", "mr-temp")
+	if ok != nil {
+		log.Fatalf("can create temp file")
+	}
 	// ofile, _ := os.Create(oname)
 
 	//
@@ -132,7 +136,10 @@ func doRecude(res TaskResponse, reducef func(string, []string) string) {
 	}
 	tmpFilename := ofile.Name()
 	ofile.Close()
-	os.Rename(tmpFilename, oname)
+	err := os.Rename(tmpFilename, oname)
+	if err != nil {
+		log.Fatalf("rename fial %v %v", tmpFilename, oname)
+	}
 }
 
 // 完成task后，通知coordinator
@@ -220,3 +227,4 @@ func call(rpcname string, args interface{}, reply interface{}) bool {
 	fmt.Println(err)
 	return false
 }
+

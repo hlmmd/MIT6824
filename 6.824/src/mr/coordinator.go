@@ -40,8 +40,8 @@ type Coordinator struct {
 //
 
 const (
-	HEART_BEAT_INTERVAL = 10
-	TIMEOUT             = 15
+	HEART_BEAT_INTERVAL = 5
+	TIMEOUT             = 10
 )
 
 func (c *Coordinator) OnHeartBeat(req *HeartBeatRequest, res *HeartBeatResponse) error {
